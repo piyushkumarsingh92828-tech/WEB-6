@@ -1,0 +1,119 @@
+middleware-demo/
+│
+├── server.js
+├── middlewares/
+│   ├── logger.js
+│   └── auth.js
+└── routes/
+    └── userRoutes.js
+📄 server.js
+js
+Copy code
+const express = require("express");
+const bodyParser = require("body-parser");
+const logger = require("./middlewares/logger");
+const auth = require("./middlewares/auth");
+const userRoutes = require("./routes/userRoutes");
+
+const app = express();
+app.use(bodyParser.json());
+
+// ✅ Custom Logging Middleware (applied globally)
+app.use(logger);
+
+// ✅ Routes (Authentication middleware applied selectively)
+app.use("/api/users", auth, userRoutes);
+
+// ✅ Start Server
+const PORT = 3000;
+app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+⚙️ middlewares/logger.js
+js
+Copy code
+// Logger Middleware: Logs method, URL, and time
+const logger = (req, res, next) => {
+  const time = new Date().toISOString();
+  console.log(`[${time}] ${req.method} ${req.originalUrl}`);
+  next(); // Move to next middleware or route
+};
+
+module.exports = logger;
+🔐 middlewares/auth.js
+js
+Copy code
+// Simple Bearer Token Authentication Middleware
+const auth = (req, res, next) => {
+  const authHeader = req.headers["authorization"];
+
+  // Check if Bearer token exists
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized: Missing or invalid token" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  // Example: Static token validation (replace with real JWT verification)
+  const validToken = "mySecretBearerToken123";
+
+  if (token !== validToken) {
+    return res.status(403).json({ message: "Forbidden: Invalid token" });
+  }
+
+  // Token valid → proceed
+  next();
+};
+
+module.exports = auth;
+🧩 routes/userRoutes.js
+js
+Copy code
+const express = require("express");
+const router = express.Router();
+
+// Example Protected Routes
+router.get("/", (req, res) => {
+  res.json({ message: "✅ Access granted: All users fetched successfully!" });
+});
+
+router.post("/", (req, res) => {
+  const { name, email } = req.body;
+  res.json({ message: "✅ New user created!", user: { name, email } });
+});
+
+module.exports = router;
+🧾 How to Run
+Install dependencies
+
+bash
+Copy code
+npm init -y
+npm install express body-parser
+Run the server
+
+bash
+Copy code
+node server.js
+Test using Postman
+
+Request:
+GET http://localhost:3000/api/users
+
+Header:
+
+makefile
+Copy code
+Authorization: Bearer mySecretBearerToken123
+✅ Response:
+
+json
+Copy code
+{
+  "message": "✅ Access granted: All users fetched successfully!"
+}
+❌ If no or invalid token:
+
+json
+Copy code
+{
+  "message": "Unauthorized: Missing or invalid token"
+}
