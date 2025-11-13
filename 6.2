@@ -1,0 +1,277 @@
+banking-api/
+│
+├── server.js
+├── config/
+│   └── db.js
+├── models/
+│   └── userModel.js
+├── controllers/
+│   └── userController.js
+├── middlewares/
+│   └── authMiddleware.js
+└── routes/
+    └── userRoutes.js
+📄 server.js
+js
+Copy code
+const express = require("express");
+const bodyParser = require("body-parser");
+const connectDB = require("./config/db");
+const userRoutes = require("./routes/userRoutes");
+
+const app = express();
+app.use(bodyParser.json());
+
+// Connect MongoDB
+connectDB();
+
+// Routes
+app.use("/api/users", userRoutes);
+
+// Start Server
+const PORT = 3000;
+app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+⚙️ config/db.js
+js
+Copy code
+const mongoose = require("mongoose");
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect("mongodb://127.0.0.1:27017/bankingDB", {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log("✅ MongoDB connected successfully");
+  } catch (error) {
+    console.error("❌ MongoDB connection failed:", error);
+    process.exit(1);
+  }
+};
+
+module.exports = connectDB;
+🧩 models/userModel.js
+js
+Copy code
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+
+const userSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  balance: { type: Number, default: 1000 },
+});
+
+// Hash password before saving
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Compare passwords
+userSchema.methods.matchPassword = async function (enteredPassword) {
+  return await bcrypt.compare(enteredPassword, this.password);
+};
+
+module.exports = mongoose.model("User", userSchema);
+🔐 middlewares/authMiddleware.js
+js
+Copy code
+const jwt = require("jsonwebtoken");
+const User = require("../models/userModel");
+
+const protect = async (req, res, next) => {
+  let token;
+
+  if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
+    try {
+      token = req.headers.authorization.split(" ")[1];
+      const decoded = jwt.verify(token, "mySecretJWTKey123");
+
+      req.user = await User.findById(decoded.id).select("-password");
+      next();
+    } catch (error) {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+  }
+
+  if (!token) return res.status(401).json({ message: "Not authorized, token missing" });
+};
+
+module.exports = { protect };
+🧠 controllers/userController.js
+js
+Copy code
+const User = require("../models/userModel");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+
+// Generate JWT Token
+const generateToken = (id) => {
+  return jwt.sign({ id }, "mySecretJWTKey123", { expiresIn: "1h" });
+};
+
+// 🧾 Register User
+exports.registerUser = async (req, res) => {
+  const { name, email, password } = req.body;
+  try {
+    const userExists = await User.findOne({ email });
+    if (userExists) return res.status(400).json({ message: "User already exists" });
+
+    const user = await User.create({ name, email, password });
+    res.status(201).json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      token: generateToken(user._id),
+    });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// 🔑 Login User
+exports.loginUser = async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const user = await User.findOne({ email });
+    if (user && (await user.matchPassword(password))) {
+      res.json({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        token: generateToken(user._id),
+      });
+    } else {
+      res.status(401).json({ message: "Invalid email or password" });
+    }
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+// 💰 Get Account Balance
+exports.getBalance = async (req, res) => {
+  try {
+    res.json({ name: req.user.name, balance: req.user.balance });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// 💸 Transfer Funds
+exports.transferFunds = async (req, res) => {
+  const { recipientEmail, amount } = req.body;
+  try {
+    const sender = await User.findById(req.user._id);
+    const recipient = await User.findOne({ email: recipientEmail });
+
+    if (!recipient) return res.status(404).json({ message: "Recipient not found" });
+    if (sender.balance < amount) return res.status(400).json({ message: "Insufficient balance" });
+
+    sender.balance -= amount;
+    recipient.balance += amount;
+
+    await sender.save();
+    await recipient.save();
+
+    res.json({ message: `₹${amount} transferred successfully to ${recipient.name}` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+🛣️ routes/userRoutes.js
+js
+Copy code
+const express = require("express");
+const router = express.Router();
+const {
+  registerUser,
+  loginUser,
+  getBalance,
+  transferFunds,
+} = require("../controllers/userController");
+
+const { protect } = require("../middlewares/authMiddleware");
+
+// Public Routes
+router.post("/register", registerUser);
+router.post("/login", loginUser);
+
+// Protected Routes
+router.get("/balance", protect, getBalance);
+router.post("/transfer", protect, transferFunds);
+
+module.exports = router;
+⚙️ Install Dependencies
+bash
+Copy code
+npm init -y
+npm install express mongoose bcryptjs jsonwebtoken body-parser
+🚀 Run Server
+bash
+Copy code
+node server.js
+🧾 Test Using Postman
+1️⃣ Register User
+POST /api/users/register
+
+json
+Copy code
+{
+  "name": "Arpit Shukla",
+  "email": "arpit@example.com",
+  "password": "123456"
+}
+2️⃣ Login User
+POST /api/users/login
+
+json
+Copy code
+{
+  "email": "arpit@example.com",
+  "password": "123456"
+}
+Response:
+
+json
+Copy code
+{
+  "_id": "673b2a...",
+  "name": "Arpit Shukla",
+  "email": "arpit@example.com",
+  "token": "eyJhbGciOiJIUzI1..."
+}
+3️⃣ Get Balance (Protected)
+GET /api/users/balance
+Header:
+
+makefile
+Copy code
+Authorization: Bearer <your_token_here>
+Response:
+
+json
+Copy code
+{
+  "name": "Arpit Shukla",
+  "balance": 1000
+}
+4️⃣ Transfer Funds (Protected)
+POST /api/users/transfer
+Header:
+
+makefile
+Copy code
+Authorization: Bearer <your_token_here>
+Body:
+
+json
+Copy code
+{
+  "recipientEmail": "friend@example.com",
+  "amount": 200
+}
